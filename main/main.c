@@ -70,9 +70,6 @@ void mpu6050_test(void *pvParameters)
 
     while (1)
     {
-        //float temp;
-        //float temp_bmp;
-        //uint32_t pressure_bmp;
         mpu6050_acceleration_t accel = { 0 };
         mpu6050_rotation_t rotation = { 0 };
         
