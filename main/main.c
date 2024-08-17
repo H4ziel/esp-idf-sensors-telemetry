@@ -22,6 +22,7 @@ static const char *TAG = "gy_87 test";  // TAG é utilizada nas funções ESP_LO
 typedef struct{
     uint32_t pressure_bmp;
     float temp;
+    float temp_mpu6050;
     float temp_bmp;
     float anglePitchRad;
     float anglePitchDeg;
@@ -75,7 +76,7 @@ void mpu6050_test(void *pvParameters)
         
         ESP_ERROR_CHECK(bmp180_measure(&dev2, &variables->temp_bmp, &variables->pressure_bmp, BMP180_MODE_STANDARD));
 
-        ESP_ERROR_CHECK(mpu6050_get_temperature(&dev, &variables->temp));
+        ESP_ERROR_CHECK(mpu6050_get_temperature(&dev, &variables->temp_mpu6050));
         ESP_ERROR_CHECK(mpu6050_get_motion(&dev, &accel, &rotation));
         ESP_ERROR_CHECK(mpu6050_get_acceleration(&dev, &accel));
 
@@ -85,12 +86,13 @@ void mpu6050_test(void *pvParameters)
         variables->anglePitchDeg = variables->anglePitchRad*(180.0/M_PI);
         variables->angleRollDeg = variables->angleRollRad*(180.0/M_PI) - 1.5; //offset
 
+        variables->temp = (variables->temp_bmp+variables->temp_mpu6050)/2.0;
+
         ESP_LOGI(TAG, "**********************************************************************");
         ESP_LOGI(TAG, "Acceleration: x=%.4f   y=%.4f   z=%.4f", accel.x, accel.y, accel.z);
         ESP_LOGI(TAG, "Rotation:     x=%.4f   y=%.4f   z=%.4f", rotation.x, rotation.y, rotation.z);
         ESP_LOGI(TAG, "Angles: Pitch=%.4f   Roll=%.4f", variables->anglePitchDeg, variables->angleRollDeg);
-        ESP_LOGI(TAG, "Temperature_MPU6050:  %.2f", variables->temp);
-        ESP_LOGI(TAG, "Temperature_BMP180:  %.2f  Pressão:  %" PRIu32 " Pa", variables->temp_bmp, variables->pressure_bmp); // pra referenciar variavel do tipo uint32_t utiliza-se %" PRIu32 " da lib inttypes.h
+        ESP_LOGI(TAG, "Temperature:  %.2f  Pressão:  %" PRIu32 " Pa", variables->temp, variables->pressure_bmp); // pra referenciar variavel do tipo uint32_t utiliza-se %" PRIu32 " da lib inttypes.h
 
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
