@@ -11,6 +11,7 @@
 #include <driver/uart.h>
 #include "hal/uart_types.h"
 #include "portmacro.h"
+//#include "lora.h"
 
 //#define configMAX_PRIORITIES 5 // nível máximo de prioridades ta definido como 25 no arquivo freertosconfig.h, então as prioridades são de 0(menor prioridade) a 24(maior prioridade), adicionar mais níveis de prioridade requer RAM
 
@@ -20,14 +21,14 @@
 #define ADDR MPU6050_I2C_ADDRESS_HIGH // quando o pino AD0 está conectado no VCC, o endereço do dispositivo mpu6050 vai ser 0x69
 #endif
 
+#define BUFFER 2024
 #define TX_PIN 17
-#define RX_PIN 16
+#define RX_PIN 23
 
 static const char *TAG = "gy_87";  // TAG é utilizada nas funções ESP_LOG para referenciar tal função ou parte do código
 static const char *TAG1 = "GPS_NEO6m";
 
-#define BUFFER 2024
-
+const uart_port_t uart_numeration = UART_NUM_2; // indica que a UART 2 será utilizada, referente aos pinos GPIO01(tx) e GPIO03(rx) do esp
 
 typedef struct{
     uint32_t pressure_bmp;
@@ -61,8 +62,8 @@ void app_main()
     ESP_ERROR_CHECK(i2cdev_init());
 
     xTaskCreatePinnedToCore(gy87, "gy87", configMINIMAL_STACK_SIZE * 6, (void*)&vars, configMAX_PRIORITIES - 1, NULL, 0);
-    xTaskCreatePinnedToCore(get_nmea, "get_nmea", configMINIMAL_STACK_SIZE * 6, (void*)&vars, configMAX_PRIORITIES - 1, NULL, 1);
     xTaskCreatePinnedToCore(gps_neo6m, "gps_neo6m", configMINIMAL_STACK_SIZE * 6, (void*)&vars, configMAX_PRIORITIES - 1, NULL, 0);
+    xTaskCreatePinnedToCore(get_nmea, "get_nmea", configMINIMAL_STACK_SIZE * 6, (void*)&vars, configMAX_PRIORITIES - 1, NULL, 1);
 }
 
 void gy87(void *pvParameters)
@@ -127,7 +128,9 @@ void gps_neo6m(void *pvParameters)
 {
     variable *variables = (variable*)pvParameters;
 
-    gps_init(); // inicia o gps, evitar usar essa função mais de 1 vez.
+    gps_init(); // inicia o gps, evitar usar essa função mais de 1 vez.  
+
+    ESP_ERROR_CHECK(uart_set_pin(uart_numeration, TX_PIN, RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE)); // solução para nao ativar a GPIO_OLED_RST (mesmo pino q RX2) durante a iniciliazação da UART
 
     while(1){
         ESP_LOGI(TAG1, "Latitude: %s %.1s", variables->lat, variables->lat_dir);
@@ -141,7 +144,6 @@ void gps_neo6m(void *pvParameters)
 
 void gps_init(void)
 {
-    const uart_port_t uart_numeration = UART_NUM_2; // indica que a UART 0 será utilizada, referente aos pinos GPIO01(tx) e GPIO03(rx) do esp
     uart_config_t uart_configuration = {
         .baud_rate = 9600,
         .data_bits = UART_DATA_8_BITS,
@@ -151,7 +153,7 @@ void gps_init(void)
     };
 
     ESP_ERROR_CHECK(uart_param_config(uart_numeration, &uart_configuration));
-    ESP_ERROR_CHECK(uart_set_pin(uart_numeration, TX_PIN, RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+    ESP_ERROR_CHECK(uart_set_pin(uart_numeration, TX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
     ESP_ERROR_CHECK(uart_driver_install(uart_numeration, BUFFER*2, 0, 0, NULL, 0));
 
     vTaskDelay(pdMS_TO_TICKS(100));
