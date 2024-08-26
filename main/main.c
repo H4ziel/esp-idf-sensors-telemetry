@@ -26,6 +26,7 @@
 
 static const char *TAG = "gy_87";  // TAG é utilizada nas funções ESP_LOG para referenciar tal função ou parte do código
 static const char *TAG1 = "GPS_NEO6m";
+static const char *TAG2 = "MQTT";
 
 typedef struct{
     uint32_t pressure_bmp;
@@ -255,9 +256,8 @@ void mqtt_treat(void *pvParameters)
                                                             variables->temp);
             vTaskDelay(pdMS_TO_TICKS(3000));
 
-
             UBaseType_t uxHighWaterMark = uxTaskGetStackHighWaterMark(NULL); // obtenção de espaço livre na task em words
-            ESP_LOGI(TAG,"Espaço mínimo livre na stack: %u\n", uxHighWaterMark);
+            ESP_LOGI(TAG2,"Espaço mínimo livre na stack: %u\n", uxHighWaterMark);
         }
     }
 }
