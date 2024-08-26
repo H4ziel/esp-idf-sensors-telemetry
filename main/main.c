@@ -1,19 +1,17 @@
 #include <inttypes.h>
 #include <stdio.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
 #include <esp_err.h>
 #include <esp_log.h>
-#include "mpu6050.h"
 #include <math.h>
-#include "bmp180.h"
-#include <string.h>
-#include <driver/uart.h>
+
+#include "driver/uart.h"
 #include "hal/uart_types.h"
 #include "portmacro.h"
-#include "lora.h"
 
-//#define configMAX_PRIORITIES 5 // nível máximo de prioridades ta definido como 25 no arquivo freertosconfig.h, então as prioridades são de 0(menor prioridade) a 24(maior prioridade), adicionar mais níveis de prioridade requer RAM
+#include "mpu6050.h"
+#include "bmp180.h"
+#include "mqtt/mqtt.h"
+#include "wifi/wifi.h"
 
 #ifdef CONFIG_EXAMPLE_I2C_ADDRESS_LOW
 #define ADDR MPU6050_I2C_ADDRESS_LOW // quando o pino AD0 está conectado no GND, o endereço do dispositivo mpu6050 vai ser 0x68
@@ -22,15 +20,12 @@
 #endif
 
 #define BUFFER 2024
-#define FREQUENCY 915e6
-#define BW 125e3
 
 #define TX_PIN 17
-#define RX_PIN 23
+#define RX_PIN 16
 
 static const char *TAG = "gy_87";  // TAG é utilizada nas funções ESP_LOG para referenciar tal função ou parte do código
 static const char *TAG1 = "GPS_NEO6m";
-static const char *TAG2 = "LoRa";
 
 typedef struct{
     uint32_t pressure_bmp;
@@ -51,50 +46,48 @@ typedef struct{
     float speed;
     float course; 
     char buf[BUFFER];
-    uint8_t packetLoRa[256];
 }variable;
-
 
 variable vars;
 void gy87(void*);
 void gps_init(void);
 void get_nmea(void*);
 void gps_neo6m(void*);
-esp_err_t setupLoRa(void);
-void sendLoRaData(void*);
+void wifi_treat(void*);
+void mqtt_treat(void*);
+
+xSemaphoreHandle wifiConnection;
+xSemaphoreHandle mqttConnection;
 
 void app_main()
 {
     ESP_ERROR_CHECK(i2cdev_init());
-    ESP_ERROR_CHECK(setupLoRa());
 
+    // Initialize NETIF
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    esp_netif_t *sta_netif = esp_netif_create_default_wifi_sta();
+    assert(sta_netif);
+
+    // Initialize NVS
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == 
+                                                ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK( ret );
+
+    wifiConnection = xSemaphoreCreateBinary();
+    mqttConnection = xSemaphoreCreateBinary();
+
+    wifi_connect();
+
+    xTaskCreatePinnedToCore(wifi_treat, "Tratamento Wifi", configMINIMAL_STACK_SIZE + 2000, NULL, configMAX_PRIORITIES - 2, NULL, 1);
+    xTaskCreatePinnedToCore(mqtt_treat, "Tratamento Mqtt", configMINIMAL_STACK_SIZE + 2000, (void*)&vars, configMAX_PRIORITIES - 2, NULL, 1);
     xTaskCreatePinnedToCore(gy87, "gy87", configMINIMAL_STACK_SIZE + 2000, (void*)&vars, configMAX_PRIORITIES - 2, NULL, 0);
     xTaskCreatePinnedToCore(gps_neo6m, "gps_neo6m", configMINIMAL_STACK_SIZE + 2000 , (void*)&vars, configMAX_PRIORITIES - 2, NULL, 0);
     xTaskCreatePinnedToCore(get_nmea, "get_nmea", configMINIMAL_STACK_SIZE + 2000, (void*)&vars, configMAX_PRIORITIES - 2, NULL, 0);
-    xTaskCreatePinnedToCore(sendLoRaData, "Send_LoRa_Data", configMINIMAL_STACK_SIZE + 2000, (void*)&vars, configMAX_PRIORITIES - 1, NULL, 1);
-}
-
-esp_err_t setupLoRa(void){
-    
-    if(lora_init() == 0){
-        ESP_LOGE(TAG2, "Error!");
-        return ESP_FAIL;
-    }
-
-    lora_set_frequency(FREQUENCY);
-    lora_set_bandwidth(BW);
-    lora_set_spreading_factor(10);
-    //lora_set_tx_power(); lora__init() seta tx power em 17 dbm 
-    lora_enable_crc(); // CRC (verificação de redundancia ciclica) método de detecção de erros, que verifica a integridade dos dados transmitidos com os dados recebidos
-    lora_set_coding_rate(5);
-    lora_set_sync_word(0x12);
-    lora_set_preamble_length(6);
-
-    vTaskDelay(pdMS_TO_TICKS(500));
-
-    ESP_LOGW(TAG2, "LoRa OK!");
-
-    return ESP_OK;
 }
 
 void gy87(void *pvParameters)
@@ -190,7 +183,7 @@ void gps_init(void)
     };
 
     ESP_ERROR_CHECK(uart_param_config(uart_numeration, &uart_configuration));
-    ESP_ERROR_CHECK(uart_set_pin(uart_numeration, TX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+    ESP_ERROR_CHECK(uart_set_pin(uart_numeration, TX_PIN, RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
     ESP_ERROR_CHECK(uart_driver_install(uart_numeration, BUFFER*2, 0, 0, NULL, 0));
 
     vTaskDelay(pdMS_TO_TICKS(500));
@@ -207,8 +200,6 @@ void get_nmea(void *pvParameters){
     const char *GGA;  // identificador que possui latitude e longitude
     //const char *VTG; // identificador que possui velocidade em Km/h
     memset(variables->buf, 0, BUFFER);
-
-    ESP_ERROR_CHECK(uart_set_pin(UART_NUM_2, TX_PIN, RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE)); // solução para nao ativar a GPIO_OLED_RST (mesmo pino q RX2) durante a iniciliazação da UART
 
     while(1){
         uart_read_bytes(UART_NUM_2, variables->buf, BUFFER, pdMS_TO_TICKS(1000));
@@ -238,61 +229,35 @@ void get_nmea(void *pvParameters){
     }   
 }
 
-void sendLoRaData(void *pvParameters){
-    variable *variables = (variable*)pvParameters;
-
-    char aux[50];
-
-    while(1){
-        strcpy((char *)variables->packetLoRa, "");
-        strcpy(aux, "");
-
-        sprintf(aux, "%.1f", variables->anglePitchDeg);
-        strcat((char *)variables->packetLoRa, aux);
-
-        sprintf(aux, "!%.1f", variables->angleRollDeg);
-        strcat((char *)variables->packetLoRa, aux);
-
-        sprintf(aux, "@%.2f", variables->temp);
-        strcat((char *)variables->packetLoRa, aux);
-
-        sprintf(aux, "#%lu", variables->pressure_bmp);
-        strcat((char *)variables->packetLoRa, aux);
-
-        sprintf(aux, "$%s", variables->lat);
-        strcat((char *)variables->packetLoRa, aux);
-
-        sprintf(aux, "¨%.1s", variables->lat_dir);
-        strcat((char *)variables->packetLoRa, aux);
-
-        sprintf(aux, "&%.11s", variables->lon);
-        strcat((char *)variables->packetLoRa, aux);
-
-        sprintf(aux, "*%.1s", variables->lon_dir);
-        strcat((char *)variables->packetLoRa, aux);
-
-        sprintf(aux, "(%.2f", variables->altitude);
-        strcat((char *)variables->packetLoRa, aux);
-        
-        sprintf(aux, ")%.3f£", variables->speed);
-        strcat((char *)variables->packetLoRa, aux);
-
-        for(int i = 0; i < sizeof(variables->packetLoRa); i++){
-            ESP_LOGI(TAG2, "Data [%s ]", (char*)&variables->packetLoRa[i]);
-            lora_send_packet(&variables->packetLoRa[i], 1);
-
-            if (strcmp((char *)variables->packetLoRa, "£") != 0){
-                ESP_LOGW(TAG2, "Packet sent!");
-                lora_end_packet(true);
-                i = sizeof(variables->packetLoRa);
-            }
+void wifi_treat(void *pvParameters)
+{
+    while(true)
+    {
+        if(xSemaphoreTake(wifiConnection, portMAX_DELAY))
+        {
+            mqtt_start();
         }
-
-        UBaseType_t uxHighWaterMark = uxTaskGetStackHighWaterMark(NULL); // obtenção de espaço livre na task em words
-        ESP_LOGI(TAG2,"Espaço mínimo livre na stack: %u\n", uxHighWaterMark);
-        
-        vTaskDelay(pdMS_TO_TICKS(3000));
     }
-    
 }
 
+void mqtt_treat(void *pvParameters)
+{
+    variable *variables = (variable*)pvParameters;
+    char msg[50];
+    if(xSemaphoreTake(mqttConnection, portMAX_DELAY))
+    {
+        while(true)
+        {
+            sprintf(msg, "{\n  \"data\":\n  {\n    \"Test\": %f\n  }\n}", 
+                                                            variables->temp);
+            mqtt_publish_msg("wnology/66cb41ac09d56a857e5fdda2/state", msg);
+            printf("{\n  \"data\":\n  {\n    \"Test\": %f\n  }\n}", 
+                                                            variables->temp);
+            vTaskDelay(pdMS_TO_TICKS(3000));
+
+
+            UBaseType_t uxHighWaterMark = uxTaskGetStackHighWaterMark(NULL); // obtenção de espaço livre na task em words
+            ESP_LOGI(TAG,"Espaço mínimo livre na stack: %u\n", uxHighWaterMark);
+        }
+    }
+}
