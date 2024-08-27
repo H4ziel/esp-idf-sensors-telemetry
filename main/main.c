@@ -37,11 +37,11 @@ typedef struct{
     float anglePitchDeg;
     float angleRollRad;
     float angleRollDeg;
-    char raw_lat[10];
-    char lat[30];
+    float raw_lat;
+    float lat;
     char lat_dir[1];
-    char raw_lon[11];
-    char lon[30];
+    float raw_lon;
+    float lon;
     char lon_dir[1];
     float altitude;
     float speed;
@@ -99,8 +99,10 @@ void gy87(void *pvParameters)
     bmp180_dev_t dev2;
     memset(&dev2, 0, sizeof(bmp180_dev_t)); // inicia o dev2  alocando memoria do size da estrutura bmp180_dev_t e preenchendo com zeros, parecido com a linha do mpu6050 dev.
 
-    ESP_ERROR_CHECK(mpu6050_init_desc(&dev, ADDR, 0, CONFIG_EXAMPLE_SDA_GPIO, CONFIG_EXAMPLE_SCL_GPIO)); // verifica se o dispositivo dev (device mpu6050) foi iniciado corretamento, com o objeto dev criado, endereço do sensor, i2c0, e as gpios SDA E SCL (são configuradas pelo menuconfig (idf.py menuconfig))
-    ESP_ERROR_CHECK(bmp180_init_desc(&dev2, 0, CONFIG_EXAMPLE_SDA_GPIO, CONFIG_EXAMPLE_SCL_GPIO));
+    ESP_ERROR_CHECK(mpu6050_init_desc(&dev, ADDR, 0, CONFIG_EXAMPLE_SDA_GPIO, 
+                                                      CONFIG_EXAMPLE_SCL_GPIO)); // verifica se o dispositivo dev (device mpu6050) foi iniciado corretamento, com o objeto dev criado, endereço do sensor, i2c0, e as gpios SDA E SCL (são configuradas pelo menuconfig (idf.py menuconfig))
+    ESP_ERROR_CHECK(bmp180_init_desc(&dev2, 0, CONFIG_EXAMPLE_SDA_GPIO, 
+                                                      CONFIG_EXAMPLE_SCL_GPIO));
     ESP_ERROR_CHECK(bmp180_init(&dev2));
 
     while (1) // loop para encontrar o sensor e configurar o protocolo i2c
@@ -125,25 +127,32 @@ void gy87(void *pvParameters)
         mpu6050_acceleration_t accel = { 0 };
         mpu6050_rotation_t rotation = { 0 };
         
-        ESP_ERROR_CHECK(bmp180_measure(&dev2, &variables->temp_bmp, &variables->pressure_bmp, BMP180_MODE_STANDARD));
+        ESP_ERROR_CHECK(bmp180_measure(&dev2, &variables->temp_bmp, 
+                            &variables->pressure_bmp, BMP180_MODE_STANDARD));
 
-        ESP_ERROR_CHECK(mpu6050_get_temperature(&dev, &variables->temp_mpu6050));
+        ESP_ERROR_CHECK(mpu6050_get_temperature(&dev,&variables->temp_mpu6050));
         ESP_ERROR_CHECK(mpu6050_get_motion(&dev, &accel, &rotation));
         ESP_ERROR_CHECK(mpu6050_get_acceleration(&dev, &accel));
 
-        variables->anglePitchRad = atan((-accel.x)/sqrt(pow(accel.y, 2) + pow(accel.z, 2)));
-        variables->angleRollRad = atan((-accel.y)/sqrt(pow(accel.x, 2) + pow(accel.z, 2)));
+        variables->anglePitchRad = atan((-accel.x)/sqrt(pow(accel.y, 2) + 
+                                                              pow(accel.z, 2)));
+        variables->angleRollRad = atan((-accel.y)/sqrt(pow(accel.x, 2) + 
+                                                              pow(accel.z, 2)));
 
         variables->anglePitchDeg = variables->anglePitchRad*(180.0/M_PI);
         variables->angleRollDeg = variables->angleRollRad*(180.0/M_PI) - 1.5; //offset
 
         variables->temp = (variables->temp_bmp+variables->temp_mpu6050)/2.0; // média entre as temperaturas medidas entre os dois sensores.
 
-        ESP_LOGI(TAG, "**********************************************************************");
-        ESP_LOGI(TAG, "Acceleration: x=%.4f   y=%.4f   z=%.4f", accel.x, accel.y, accel.z);
-        ESP_LOGI(TAG, "Rotation:     x=%.4f   y=%.4f   z=%.4f", rotation.x, rotation.y, rotation.z);
-        ESP_LOGI(TAG, "Angles: Pitch=%.1f   Roll=%.1f", variables->anglePitchDeg, variables->angleRollDeg);
-        ESP_LOGI(TAG, "Temperature:  %.2f  Pressão:  %" PRIu32 " Pa", variables->temp, variables->pressure_bmp); // pra referenciar variavel do tipo uint32_t utiliza-se %" PRIu32 " da lib inttypes.h
+        ESP_LOGI(TAG, "******************************************************");
+        ESP_LOGI(TAG, "Acceleration: x=%.4f   y=%.4f   z=%.4f", accel.x,accel.y,
+                                                                       accel.z);
+        ESP_LOGI(TAG, "Rotation:     x=%.4f   y=%.4f   z=%.4f", rotation.x, 
+                                                        rotation.y, rotation.z);
+        ESP_LOGI(TAG, "Angles: Pitch=%.1f   Roll=%.1f",variables->anglePitchDeg,
+                                                       variables->angleRollDeg);
+        ESP_LOGI(TAG, "Temperature:  %.2f  Pressão:  %" PRIu32 " Pa", 
+                                      variables->temp, variables->pressure_bmp); // pra referenciar variavel do tipo uint32_t utiliza-se %" PRIu32 " da lib inttypes.h
 
         UBaseType_t uxHighWaterMark = uxTaskGetStackHighWaterMark(NULL); // obtenção de espaço livre na task em words
         ESP_LOGI(TAG,"Espaço mínimo livre na stack: %u\n", uxHighWaterMark);
@@ -159,8 +168,8 @@ void gps_neo6m(void *pvParameters)
     gps_init(); // inicia o gps, evitar usar essa função mais de 1 vez.  
 
     while(1){
-        ESP_LOGI(TAG1, "Latitude: %s %.1s", variables->lat, variables->lat_dir);
-        ESP_LOGI(TAG1, "Longitude: %.11s %.1s", variables->lon, variables->lon_dir);
+        ESP_LOGI(TAG1, "Latitude: %f", variables->lat);
+        ESP_LOGI(TAG1, "Longitude: %f", variables->lon);
         ESP_LOGI(TAG1, "Altitude: %.2f", variables->altitude);
         ESP_LOGI(TAG1, "Velocidade: %.3f", variables->speed);
 
@@ -184,8 +193,10 @@ void gps_init(void)
     };
 
     ESP_ERROR_CHECK(uart_param_config(uart_numeration, &uart_configuration));
-    ESP_ERROR_CHECK(uart_set_pin(uart_numeration, TX_PIN, RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-    ESP_ERROR_CHECK(uart_driver_install(uart_numeration, BUFFER*2, 0, 0, NULL, 0));
+    ESP_ERROR_CHECK(uart_set_pin(uart_numeration, TX_PIN, RX_PIN, 
+                                    UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+    ESP_ERROR_CHECK(uart_driver_install(uart_numeration, BUFFER*2, 0, 0, NULL,
+                                                                            0));
 
     vTaskDelay(pdMS_TO_TICKS(500));
 }
@@ -193,40 +204,55 @@ void gps_init(void)
 void get_nmea(void *pvParameters){
     variable *variables = (variable*)pvParameters;
 
-    char aux_lat[6]; // Para armazenar os caracteres do índice 5 ao 9
-    char aux_lon[7];
-    float aux_lat_float;
-    float aux_lon_float;
+    int latitude_deg;
+    float latitude_min_sec;
+    int latitude_min;
+    float latitude_sec;
+    int longitude_deg;
+    float longitude_min_sec;
+    int longitude_min;
+    float longitude_sec;
 
     const char *GGA;  // identificador que possui latitude e longitude
     //const char *VTG; // identificador que possui velocidade em Km/h
     memset(variables->buf, 0, BUFFER);
 
     while(1){
-        uart_read_bytes(UART_NUM_2, variables->buf, BUFFER, pdMS_TO_TICKS(1000));
+        uart_read_bytes(UART_NUM_2, variables->buf, BUFFER,pdMS_TO_TICKS(1000));
         //ESP_LOGI(TAG1, "%s\n", variables->buf);
 
         GGA = strstr(variables->buf, "$GPGGA");
         if (GGA != NULL) {
-            sscanf(GGA, "$GPGGA,%*f,%10[^,],%1[^,],%11[^,],%1[^,],%*d,%*f,%*f,%f", variables->raw_lat, variables->lat_dir, variables->raw_lon, variables->lon_dir, &variables->altitude);
+            sscanf(GGA, "$GPGGA,%*f,%f,%1[^,],%f,%1[^,],%*d,%*f,%*f,%f", 
+                                        &variables->raw_lat, variables->lat_dir,
+                                        &variables->raw_lon, variables->lon_dir, 
+                                                          &variables->altitude);
         }
 
-        sscanf(variables->buf, "$GPVTG,,%*s,,%*s,%*f,%*s, %f,%*s,%*s", &variables->speed);
+        sscanf(variables->buf, "$GPVTG,,%*s,,%*s,%*f,%*s, %f,%*s,%*s", 
+                                                             &variables->speed);
 
-        // Extrai os caracteres do índice 5 ao 9
-        strncpy(aux_lat, variables->raw_lat + 5, 5);
-        aux_lat[5] = '\0'; // Adiciona o terminador nulo
+        latitude_deg = (int)(variables->raw_lat/100);
+        latitude_min_sec = (variables->raw_lat - latitude_deg*100);
+        latitude_min = (int)latitude_min_sec;
+        latitude_sec = (latitude_min_sec - latitude_min);
+        variables->lat = latitude_deg + (latitude_min/60.0) + (latitude_sec/60);
 
-        strncpy(aux_lon, variables->raw_lon + 6, 5);
-        aux_lon[5] = '\0'; // Adiciona o terminador nulo
+        longitude_deg = (int)(variables->raw_lon/100);
+        longitude_min_sec = (variables->raw_lon - longitude_deg*100);
+        longitude_min = (int)longitude_min_sec;
+        longitude_sec = (longitude_min_sec - longitude_min);
+        variables->lon = longitude_deg +(longitude_min/60.0)+(longitude_sec/60);
 
-        // Converte a substring para float
-        aux_lat_float = atof(aux_lat);
-        aux_lon_float = atof(aux_lon);
+        if(strcmp(variables->lat_dir, "S") == 0)
+        {
+            variables->lat = variables->lat*(-1);
+        }
 
-        // novas strings
-        snprintf(variables->lat, sizeof(variables->lat), "%c%c\xB0%c%c'%.3f\x22", variables->raw_lat[0], variables->raw_lat[1], variables->raw_lat[2], variables->raw_lat[3], aux_lat_float * 60 / 100000);
-        snprintf(variables->lon, sizeof(variables->lon), "%c%c%c\xB0%c%c'%.3f\x22", variables->raw_lon[0], variables->raw_lon[1], variables->raw_lon[2], variables->raw_lon[3], variables->raw_lon[4], aux_lon_float * 60 / 100000);
+        if(strcmp(variables->lon_dir, "W") == 0)
+        {
+            variables->lon = variables->lon*(-1);
+        }
     }   
 }
 
@@ -244,20 +270,18 @@ void wifi_treat(void *pvParameters)
 void mqtt_treat(void *pvParameters)
 {
     variable *variables = (variable*)pvParameters;
-    char msg[50];
+    char msg[500];
     if(xSemaphoreTake(mqttConnection, portMAX_DELAY))
     {
         while(true)
         {
-            sprintf(msg, "{\n  \"data\":\n  {\n    \"Test\": %f\n  }\n}", 
-                                                            variables->temp);
-            mqtt_publish_msg("wnology/66cb41ac09d56a857e5fdda2/state", msg);
-            printf("{\n  \"data\":\n  {\n    \"Test\": %f\n  }\n}", 
-                                                            variables->temp);
+            sprintf(msg, "{\n  \"data\":\n  {\n    \"Test\": %f,\n    \"gpstrack\": \"%f,%f\"\n  }\n}", variables->temp, variables->lat, variables->lon);
+            mqtt_publish_msg("wnology//state", msg);
+            printf(msg);
             vTaskDelay(pdMS_TO_TICKS(3000));
 
-            UBaseType_t uxHighWaterMark = uxTaskGetStackHighWaterMark(NULL); // obtenção de espaço livre na task em words
-            ESP_LOGI(TAG2,"Espaço mínimo livre na stack: %u\n", uxHighWaterMark);
+            UBaseType_t uxHighWaterMark = uxTaskGetStackHighWaterMark(NULL);
+            ESP_LOGI(TAG2,"Espaço mínimo livre na stack: %u\n",uxHighWaterMark);
         }
     }
 }

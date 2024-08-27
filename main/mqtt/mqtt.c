@@ -45,13 +45,13 @@ static esp_err_t mqtt_event_handler_cb(esp_mqtt_event_handle_t event)
             if (event->error_handle->error_type == 
                                                 MQTT_ERROR_TYPE_TCP_TRANSPORT) {
                 log_error_if_nonzero("reported from esp-tls", 
-                                    event->error_handle->esp_tls_last_esp_err);
+                                     event->error_handle->esp_tls_last_esp_err);
                 log_error_if_nonzero("reported from tls stack", 
-                                    event->error_handle->esp_tls_stack_err);
+                                     event->error_handle->esp_tls_stack_err);
                 log_error_if_nonzero("captured as transport's socket errno",  
-                                event->error_handle->esp_transport_sock_errno);
+                                 event->error_handle->esp_transport_sock_errno);
                 ESP_LOGI(TAG, "Last errno string (%s)", 
-                    strerror(event->error_handle->esp_transport_sock_errno));
+                       strerror(event->error_handle->esp_transport_sock_errno));
 
             }
             vTaskDelay(pdMS_TO_TICKS(300));
@@ -65,10 +65,10 @@ static esp_err_t mqtt_event_handler_cb(esp_mqtt_event_handle_t event)
 }
 
 static void mqtt_event_handler(void *handler_args, esp_event_base_t event_base,
-                                            int32_t event_id, void *event_data)
+                                             int32_t event_id, void *event_data)
 {
     ESP_LOGW(TAG, "Event loop base=%s, event_id=%" PRIi32 "", 
-                                                        event_base, event_id);
+                                                          event_base, event_id);
     mqtt_event_handler_cb(event_data); 
 
     vTaskDelay(pdMS_TO_TICKS(300));                       
