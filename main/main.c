@@ -51,7 +51,7 @@ typedef struct{
     float speed;
     float course; 
     char buf[BUFFER];
-    uint8_t packetLoRa[256];
+    uint8_t packetLoRa[255];
 }variable;
 
 
@@ -259,10 +259,10 @@ void sendLoRaData(void *pvParameters){
         sprintf(aux, "#%lu", variables->pressure_bmp);
         strcat((char *)variables->packetLoRa, aux);
 
-        sprintf(aux, "$%s", variables->lat);
+        sprintf(aux, "C%s", variables->lat);
         strcat((char *)variables->packetLoRa, aux);
 
-        sprintf(aux, "¨%.1s", variables->lat_dir);
+        sprintf(aux, "A%.1s", variables->lat_dir);
         strcat((char *)variables->packetLoRa, aux);
 
         sprintf(aux, "&%.11s", variables->lon);
@@ -274,19 +274,11 @@ void sendLoRaData(void *pvParameters){
         sprintf(aux, "(%.2f", variables->altitude);
         strcat((char *)variables->packetLoRa, aux);
         
-        sprintf(aux, ")%.3f£", variables->speed);
+        sprintf(aux, ")%.3fB", variables->speed);
         strcat((char *)variables->packetLoRa, aux);
-
-        for(int i = 0; i < sizeof(variables->packetLoRa); i++){
-            ESP_LOGI(TAG2, "Data [%s ]", (char*)&variables->packetLoRa[i]);
-            lora_send_packet(&variables->packetLoRa[i], 1);
-
-            if (strcmp((char *)variables->packetLoRa, "£") != 0){
-                ESP_LOGW(TAG2, "Packet sent!");
-                lora_end_packet(true);
-                i = sizeof(variables->packetLoRa);
-            }
-        }
+        
+        lora_send_packet(variables->packetLoRa, sizeof(variables->packetLoRa));
+        ESP_LOGI(TAG2, "Data: %s\n Size: %d", (char *) variables->packetLoRa, sizeof(variables->packetLoRa));
 
         UBaseType_t uxHighWaterMark = uxTaskGetStackHighWaterMark(NULL); // obtenção de espaço livre na task em words
         ESP_LOGI(TAG2,"Espaço mínimo livre na stack: %u\n", uxHighWaterMark);
