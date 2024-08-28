@@ -52,6 +52,8 @@ typedef struct{
     float course; 
     char buf[BUFFER];
     uint8_t packetLoRa[255];
+    uint8_t snr;
+    float rssi;
 }variable;
 
 
@@ -244,6 +246,9 @@ void sendLoRaData(void *pvParameters){
     char aux[50];
 
     while(1){
+
+        variables->snr = lora_packet_rssi();
+
         strcpy((char *)variables->packetLoRa, "");
         strcpy(aux, "");
 
@@ -274,8 +279,12 @@ void sendLoRaData(void *pvParameters){
         sprintf(aux, "(%.2f", variables->altitude);
         strcat((char *)variables->packetLoRa, aux);
         
-        sprintf(aux, ")%.3fB", variables->speed);
+        sprintf(aux, ")%.3f", variables->speed);
         strcat((char *)variables->packetLoRa, aux);
+
+        sprintf(aux, "B%dE", variables->snr);
+        strcat((char *)variables->packetLoRa, aux);
+
         
         lora_send_packet(variables->packetLoRa, sizeof(variables->packetLoRa));
         ESP_LOGI(TAG2, "Data: %s\n Size: %d", (char *) variables->packetLoRa, sizeof(variables->packetLoRa));
