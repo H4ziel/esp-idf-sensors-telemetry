@@ -201,7 +201,8 @@ void gps_init(void)
     vTaskDelay(pdMS_TO_TICKS(500));
 }
 
-void get_nmea(void *pvParameters){
+void get_nmea(void *pvParameters)
+{
     variable *variables = (variable*)pvParameters;
 
     int latitude_deg;
@@ -222,7 +223,8 @@ void get_nmea(void *pvParameters){
         //ESP_LOGI(TAG1, "%s\n", variables->buf);
 
         GGA = strstr(variables->buf, "$GPGGA");
-        if (GGA != NULL) {
+        if (GGA != NULL) 
+        {
             sscanf(GGA, "$GPGGA,%*f,%f,%1[^,],%f,%1[^,],%*d,%*f,%*f,%f", 
                                         &variables->raw_lat, variables->lat_dir,
                                         &variables->raw_lon, variables->lon_dir, 
