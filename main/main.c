@@ -246,8 +246,7 @@ void sendLoRaData(void *pvParameters){
     char aux[50];
 
     while(1){
-
-        variables->snr = lora_packet_rssi();
+        variables->snr = lora_packet_snr();
 
         strcpy((char *)variables->packetLoRa, "");
         strcpy(aux, "");
@@ -294,6 +293,5 @@ void sendLoRaData(void *pvParameters){
         
         vTaskDelay(pdMS_TO_TICKS(3000));
     }
-    
 }
 
