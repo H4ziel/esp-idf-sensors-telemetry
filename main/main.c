@@ -1,14 +1,16 @@
 #include <inttypes.h>
 #include <stdio.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
-#include <esp_err.h>
-#include <esp_log.h>
-#include "mpu6050.h"
 #include <math.h>
-#include "bmp180.h"
 #include <string.h>
-#include <driver/uart.h>
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/semphr.h"
+#include "esp_err.h"
+#include "esp_log.h"
+#include "mpu6050.h"
+#include "bmp180.h"
+#include "driver/uart.h"
 #include "hal/uart_types.h"
 #include "portmacro.h"
 #include "lora.h"
@@ -74,6 +76,11 @@ void app_main()
     xTaskCreatePinnedToCore(gps_neo6m, "gps_neo6m", configMINIMAL_STACK_SIZE + 2000 , (void*)&vars, configMAX_PRIORITIES - 2, NULL, 0);
     xTaskCreatePinnedToCore(get_nmea, "get_nmea", configMINIMAL_STACK_SIZE + 2000, (void*)&vars, configMAX_PRIORITIES - 2, NULL, 0);
     xTaskCreatePinnedToCore(sendLoRaData, "Send_LoRa_Data", configMINIMAL_STACK_SIZE + 2000, (void*)&vars, configMAX_PRIORITIES - 1, NULL, 1);
+
+    for(;;)
+    {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
 }
 
 esp_err_t setupLoRa(void){
@@ -86,7 +93,7 @@ esp_err_t setupLoRa(void){
     lora_set_frequency(FREQUENCY);
     lora_set_bandwidth(BW);
     lora_set_spreading_factor(10);
-    //lora_set_tx_power(); lora__init() seta tx power em 17 dbm 
+    lora_set_tx_power(20); 
     lora_enable_crc(); // CRC (verificação de redundancia ciclica) método de detecção de erros, que verifica a integridade dos dados transmitidos com os dados recebidos
     lora_set_coding_rate(5);
     lora_set_sync_word(0x12);
