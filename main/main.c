@@ -1,21 +1,16 @@
 #include <inttypes.h>
 #include <stdio.h>
+#include <esp_err.h>
+#include <esp_log.h>
 #include <math.h>
-#include <string.h>
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/semphr.h"
-#include "esp_err.h"
-#include "esp_log.h"
-#include "mpu6050.h"
-#include "bmp180.h"
 #include "driver/uart.h"
 #include "hal/uart_types.h"
 #include "portmacro.h"
-#include "lora.h"
 
-//#define configMAX_PRIORITIES 5 // nível máximo de prioridades ta definido como 25 no arquivo freertosconfig.h, então as prioridades são de 0(menor prioridade) a 24(maior prioridade), adicionar mais níveis de prioridade requer RAM
+#include "mpu6050.h"
+#include "bmp180.h"
+#include "lora.h"
 
 #ifdef CONFIG_EXAMPLE_I2C_ADDRESS_LOW
 #define ADDR MPU6050_I2C_ADDRESS_LOW // quando o pino AD0 está conectado no GND, o endereço do dispositivo mpu6050 vai ser 0x68
@@ -32,7 +27,7 @@
 
 static const char *TAG = "gy_87";  // TAG é utilizada nas funções ESP_LOG para referenciar tal função ou parte do código
 static const char *TAG1 = "GPS_NEO6m";
-static const char *TAG2 = "LoRa";
+static const char *TAG3 = "LoRa";
 
 typedef struct{
     uint32_t pressure_bmp;
@@ -43,21 +38,18 @@ typedef struct{
     float anglePitchDeg;
     float angleRollRad;
     float angleRollDeg;
-    char raw_lat[10];
-    char lat[30];
+    float raw_lat;
+    float lat;
     char lat_dir[1];
-    char raw_lon[11];
-    char lon[30];
+    float raw_lon;
+    float lon;
     char lon_dir[1];
     float altitude;
     float speed;
     float course; 
     char buf[BUFFER];
     uint8_t packetLoRa[255];
-    uint8_t snr;
-    float rssi;
 }variable;
-
 
 variable vars;
 void gy87(void*);
@@ -74,10 +66,10 @@ void app_main()
 
     xTaskCreatePinnedToCore(gy87, "gy87", configMINIMAL_STACK_SIZE + 2000, 
                                (void*)&vars, configMAX_PRIORITIES - 2, NULL, 0);
-    xTaskCreatePinnedToCore(gps_neo6m, "gps_neo6m", configMINIMAL_STACK_SIZE + 
-                        2000 , (void*)&vars, configMAX_PRIORITIES - 2, NULL, 0);
-    xTaskCreatePinnedToCore(get_nmea, "get_nmea", configMINIMAL_STACK_SIZE + 
-                         2000, (void*)&vars, configMAX_PRIORITIES - 2, NULL, 0);
+    xTaskCreatePinnedToCore(gps_neo6m, "gps_neo6m",configMINIMAL_STACK_SIZE+2000,
+                               (void*)&vars, configMAX_PRIORITIES - 2, NULL, 0);
+    xTaskCreatePinnedToCore(get_nmea, "get_nmea", configMINIMAL_STACK_SIZE+2000,
+                               (void*)&vars, configMAX_PRIORITIES - 2, NULL, 0);
     xTaskCreatePinnedToCore(sendLoRaData, "Send_LoRa_Data", 
                                   configMINIMAL_STACK_SIZE + 2000, (void*)&vars,
                                              configMAX_PRIORITIES - 1, NULL, 1);
@@ -85,13 +77,13 @@ void app_main()
     for(;;)
     {
         vTaskDelay(pdMS_TO_TICKS(1000));
-    }
+    }   
 }
 
 esp_err_t setupLoRa(void){
     
     if(lora_init() == 0){
-        ESP_LOGE(TAG2, "Error!");
+        ESP_LOGE(TAG3, "Error!");
         return ESP_FAIL;
     }
 
@@ -106,7 +98,7 @@ esp_err_t setupLoRa(void){
 
     vTaskDelay(pdMS_TO_TICKS(500));
 
-    ESP_LOGW(TAG2, "LoRa OK!");
+    ESP_LOGW(TAG3, "LoRa OK!");
 
     return ESP_OK;
 }
@@ -148,7 +140,7 @@ void gy87(void *pvParameters)
         mpu6050_rotation_t rotation = { 0 };
         
         ESP_ERROR_CHECK(bmp180_measure(&dev2, &variables->temp_bmp, 
-                               &variables->pressure_bmp, BMP180_MODE_STANDARD));
+                            &variables->pressure_bmp, BMP180_MODE_STANDARD));
 
         ESP_ERROR_CHECK(mpu6050_get_temperature(&dev,&variables->temp_mpu6050));
         ESP_ERROR_CHECK(mpu6050_get_motion(&dev, &accel, &rotation));
@@ -165,11 +157,11 @@ void gy87(void *pvParameters)
         variables->temp = (variables->temp_bmp+variables->temp_mpu6050)/2.0; // média entre as temperaturas medidas entre os dois sensores.
 
         ESP_LOGI(TAG, "******************************************************");
-        ESP_LOGI(TAG, "Acceleration: x=%.4f   y=%.4f   z=%.4f", accel.x, accel.y, 
+        ESP_LOGI(TAG, "Acceleration: x=%.4f   y=%.4f   z=%.4f", accel.x,accel.y,
                                                                        accel.z);
         ESP_LOGI(TAG, "Rotation:     x=%.4f   y=%.4f   z=%.4f", rotation.x, 
                                                         rotation.y, rotation.z);
-        ESP_LOGI(TAG, "Angles: Pitch=%.1f   Roll=%.1f", variables->anglePitchDeg, 
+        ESP_LOGI(TAG, "Angles: Pitch=%.1f   Roll=%.1f",variables->anglePitchDeg,
                                                        variables->angleRollDeg);
         ESP_LOGI(TAG, "Temperature:  %.2f  Pressão:  %" PRIu32 " Pa", 
                                       variables->temp, variables->pressure_bmp); // pra referenciar variavel do tipo uint32_t utiliza-se %" PRIu32 " da lib inttypes.h
@@ -188,9 +180,8 @@ void gps_neo6m(void *pvParameters)
     gps_init(); // inicia o gps, evitar usar essa função mais de 1 vez.  
 
     while(1){
-        ESP_LOGI(TAG1, "Latitude: %s %.1s", variables->lat, variables->lat_dir);
-        ESP_LOGI(TAG1, "Longitude: %.11s %.1s", variables->lon, 
-                                                            variables->lon_dir);
+        ESP_LOGI(TAG1, "Latitude: %f", variables->lat);
+        ESP_LOGI(TAG1, "Longitude: %f", variables->lon);
         ESP_LOGI(TAG1, "Altitude: %.2f", variables->altitude);
         ESP_LOGI(TAG1, "Velocidade: %.3f", variables->speed);
 
@@ -214,64 +205,68 @@ void gps_init(void)
     };
 
     ESP_ERROR_CHECK(uart_param_config(uart_numeration, &uart_configuration));
-    ESP_ERROR_CHECK(uart_set_pin(uart_numeration, TX_PIN, UART_PIN_NO_CHANGE, 
-                                       UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-    ESP_ERROR_CHECK(uart_driver_install(uart_numeration, BUFFER*2, 0, 0, NULL, 
+    ESP_ERROR_CHECK(uart_set_pin(uart_numeration, TX_PIN, RX_PIN, 
+                                    UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+    ESP_ERROR_CHECK(uart_driver_install(uart_numeration, BUFFER*2, 0, 0, NULL,
                                                                             0));
 
     vTaskDelay(pdMS_TO_TICKS(500));
 }
 
-void get_nmea(void *pvParameters){
+void get_nmea(void *pvParameters)
+{
     variable *variables = (variable*)pvParameters;
 
-    char aux_lat[6]; // Para armazenar os caracteres do índice 5 ao 9
-    char aux_lon[7];
-    float aux_lat_float;
-    float aux_lon_float;
+    int latitude_deg;
+    float latitude_min_sec;
+    int latitude_min;
+    float latitude_sec;
+    int longitude_deg;
+    float longitude_min_sec;
+    int longitude_min;
+    float longitude_sec;
 
     const char *GGA;  // identificador que possui latitude e longitude
     //const char *VTG; // identificador que possui velocidade em Km/h
     memset(variables->buf, 0, BUFFER);
 
-    ESP_ERROR_CHECK(uart_set_pin(UART_NUM_2, TX_PIN, RX_PIN, UART_PIN_NO_CHANGE,
-                                                           UART_PIN_NO_CHANGE)); // solução para nao ativar a GPIO_OLED_RST (mesmo pino q RX2) durante a iniciliazação da UART
-
     while(1){
-        uart_read_bytes(UART_NUM_2, variables->buf, BUFFER, pdMS_TO_TICKS(1000));
+        uart_read_bytes(UART_NUM_2, variables->buf, BUFFER,pdMS_TO_TICKS(1000));
         //ESP_LOGI(TAG1, "%s\n", variables->buf);
 
         GGA = strstr(variables->buf, "$GPGGA");
-        if (GGA != NULL) {
-            sscanf(GGA,"$GPGGA,%*f,%10[^,],%1[^,],%11[^,],%1[^,],%*d,%*f,%*f,%f", 
-                                         variables->raw_lat, variables->lat_dir,
-                                         variables->raw_lon, variables->lon_dir,
+        if (GGA != NULL) 
+        {
+            sscanf(GGA, "$GPGGA,%*f,%f,%1[^,],%f,%1[^,],%*d,%*f,%*f,%f", 
+                                        &variables->raw_lat, variables->lat_dir,
+                                        &variables->raw_lon, variables->lon_dir, 
                                                           &variables->altitude);
         }
 
         sscanf(variables->buf, "$GPVTG,,%*s,,%*s,%*f,%*s, %f,%*s,%*s", 
                                                              &variables->speed);
 
-        // Extrai os caracteres do índice 5 ao 9
-        strncpy(aux_lat, variables->raw_lat + 5, 5);
-        aux_lat[5] = '\0'; // Adiciona o terminador nulo
+        latitude_deg = (int)(variables->raw_lat/100);
+        latitude_min_sec = (variables->raw_lat - latitude_deg*100);
+        latitude_min = (int)latitude_min_sec;
+        latitude_sec = (latitude_min_sec - latitude_min);
+        variables->lat = latitude_deg + (latitude_min/60.0) + (latitude_sec/60);
 
-        strncpy(aux_lon, variables->raw_lon + 6, 5);
-        aux_lon[5] = '\0'; // Adiciona o terminador nulo
+        longitude_deg = (int)(variables->raw_lon/100);
+        longitude_min_sec = (variables->raw_lon - longitude_deg*100);
+        longitude_min = (int)longitude_min_sec;
+        longitude_sec = (longitude_min_sec - longitude_min);
+        variables->lon = longitude_deg +(longitude_min/60.0)+(longitude_sec/60);
 
-        // Converte a substring para float
-        aux_lat_float = atof(aux_lat);
-        aux_lon_float = atof(aux_lon);
+        if(strcmp(variables->lat_dir, "S") == 0)
+        {
+            variables->lat = variables->lat*(-1);
+        }
 
-        // novas strings
-        snprintf(variables->lat, sizeof(variables->lat), "%c%c\xB0%c%c'%.3f\x22",
-                                   variables->raw_lat[0], variables->raw_lat[1], 
-                                   variables->raw_lat[2], variables->raw_lat[3], 
-                                                   aux_lat_float * 60 / 100000);
-        snprintf(variables->lon,sizeof(variables->lon),"%c%c%c\xB0%c%c'%.3f\x22", 
-                                   variables->raw_lon[0], variables->raw_lon[1], 
-                                   variables->raw_lon[2], variables->raw_lon[3], 
-                                   variables->raw_lon[4],aux_lon_float*60/100000);
+        if(strcmp(variables->lon_dir, "W") == 0)
+        {
+            variables->lon = variables->lon*(-1);
+        }
     }   
 }
 
@@ -281,7 +276,6 @@ void sendLoRaData(void *pvParameters){
     char aux[50];
 
     while(1){
-        variables->snr = lora_packet_snr();
 
         strcpy((char *)variables->packetLoRa, "");
         strcpy(aux, "");
@@ -298,13 +292,13 @@ void sendLoRaData(void *pvParameters){
         sprintf(aux, "#%lu", variables->pressure_bmp);
         strcat((char *)variables->packetLoRa, aux);
 
-        sprintf(aux, "C%s", variables->lat);
+        sprintf(aux, "C%f", variables->lat);
         strcat((char *)variables->packetLoRa, aux);
 
         sprintf(aux, "A%.1s", variables->lat_dir);
         strcat((char *)variables->packetLoRa, aux);
 
-        sprintf(aux, "&%.11s", variables->lon);
+        sprintf(aux, "&%f", variables->lon);
         strcat((char *)variables->packetLoRa, aux);
 
         sprintf(aux, "*%.1s", variables->lon_dir);
@@ -313,21 +307,16 @@ void sendLoRaData(void *pvParameters){
         sprintf(aux, "(%.2f", variables->altitude);
         strcat((char *)variables->packetLoRa, aux);
         
-        sprintf(aux, ")%.3f", variables->speed);
+        sprintf(aux, ")%.3fB", variables->speed);
         strcat((char *)variables->packetLoRa, aux);
-
-        sprintf(aux, "B%dE", variables->snr);
-        strcat((char *)variables->packetLoRa, aux);
-
         
         lora_send_packet(variables->packetLoRa, sizeof(variables->packetLoRa));
-        ESP_LOGI(TAG2, "Data: %s\n Size: %d", (char *) variables->packetLoRa, 
+        ESP_LOGI(TAG3, "Data: %s\n Size: %d", (char *) variables->packetLoRa, 
                                                  sizeof(variables->packetLoRa));
 
         UBaseType_t uxHighWaterMark = uxTaskGetStackHighWaterMark(NULL); // obtenção de espaço livre na task em words
-        ESP_LOGI(TAG2,"Espaço mínimo livre na stack: %u\n", uxHighWaterMark);
+        ESP_LOGI(TAG3,"Espaço mínimo livre na stack: %u\n", uxHighWaterMark);
         
-        vTaskDelay(pdMS_TO_TICKS(3000));
+        vTaskDelay(pdMS_TO_TICKS(2000));
     }
 }
-
