@@ -21,6 +21,8 @@
 #endif
 
 #define BUFFER 2024
+#define FREQUENCY 915e6
+#define BW 125e3
 
 #define TX_PIN 17
 #define RX_PIN 16
@@ -56,59 +58,49 @@ void gy87(void*);
 void gps_init(void);
 void get_nmea(void*);
 void gps_neo6m(void*);
-void wifi_treat(void*);
-void mqtt_treat(void*);
 esp_err_t setupLoRa(void);
-//void sendLoRaData(void*);
-
-xSemaphoreHandle wifiConnection;
-xSemaphoreHandle mqttConnection;
+void sendLoRaData(void*);
 
 void app_main()
 {
     ESP_ERROR_CHECK(i2cdev_init());
+    ESP_ERROR_CHECK(setupLoRa());
 
-    // Initialize NETIF
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_t *sta_netif = esp_netif_create_default_wifi_sta();
-    assert(sta_netif);
-
-    // Initialize NVS
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == 
-                                                ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ret = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK( ret );
-
-    wifiConnection = xSemaphoreCreateBinary();
-    mqttConnection = xSemaphoreCreateBinary();
-
-    wifi_connect();
-
-    xTaskCreatePinnedToCore(wifi_treat,"Tratamento Wifi",configMINIMAL_STACK_SIZE+2000,
-                                       NULL, configMAX_PRIORITIES - 1, NULL, 1);
-    xTaskCreatePinnedToCore(mqtt_treat,"Tratamento Mqtt",configMINIMAL_STACK_SIZE+2000, 
-                               (void*)&vars, configMAX_PRIORITIES - 1, NULL, 1);
     xTaskCreatePinnedToCore(gy87, "gy87", configMINIMAL_STACK_SIZE + 2000, 
                                (void*)&vars, configMAX_PRIORITIES - 2, NULL, 0);
     xTaskCreatePinnedToCore(gps_neo6m, "gps_neo6m",configMINIMAL_STACK_SIZE+2000,
                                (void*)&vars, configMAX_PRIORITIES - 2, NULL, 0);
     xTaskCreatePinnedToCore(get_nmea, "get_nmea", configMINIMAL_STACK_SIZE+2000,
                                (void*)&vars, configMAX_PRIORITIES - 2, NULL, 0);
-    //xTaskCreatePinnedToCore(sendLoRaData,"Send LoRa Data",configMINIMAL_STACK_SIZE+2000,
-                               //(void*)&vars, configMAX_PRIORITIES - 1, NULL, 1);   
+    xTaskCreatePinnedToCore(sendLoRaData, "Send_LoRa_Data", 
+                                  configMINIMAL_STACK_SIZE + 2000, (void*)&vars,
+                                             configMAX_PRIORITIES - 1, NULL, 1);
+
+    for(;;)
+    {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }   
 }
 
-esp_err_t setupLoRa(void)
-{
-    if(lora_init() == 0)
-    {
-        ESP_LOGE(TAG3, "Initializing Error!");
+esp_err_t setupLoRa(void){
+    
+    if(lora_init() == 0){
+        ESP_LOGE(TAG2, "Error!");
         return ESP_FAIL;
     }
+
+    lora_set_frequency(FREQUENCY);
+    lora_set_bandwidth(BW);
+    lora_set_spreading_factor(10);
+    lora_set_tx_power(20); 
+    lora_enable_crc(); // CRC (verificação de redundancia ciclica) método de detecção de erros, que verifica a integridade dos dados transmitidos com os dados recebidos
+    lora_set_coding_rate(5);
+    lora_set_sync_word(0x12);
+    lora_set_preamble_length(6);
+
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    ESP_LOGW(TAG2, "LoRa OK!");
 
     return ESP_OK;
 }
@@ -280,32 +272,58 @@ void get_nmea(void *pvParameters)
     }   
 }
 
-void wifi_treat(void *pvParameters)
-{
-    while(true)
-    {
-        if(xSemaphoreTake(wifiConnection, portMAX_DELAY))
-        {
-            mqtt_start();
-        }
-    }
-}
-
-void mqtt_treat(void *pvParameters)
-{
+void sendLoRaData(void *pvParameters){
     variable *variables = (variable*)pvParameters;
-    char msg[500];
-    if(xSemaphoreTake(mqttConnection, portMAX_DELAY))
-    {
-        while(true)
-        {
-            sprintf(msg, "{\n  \"data\":\n  {\n    \"Test\": %f,\n    \"gpstrack\": \"%f,%f\"\n  }\n}", variables->temp, variables->lat, variables->lon);
-            mqtt_publish_msg("wnology//state", msg);
-            printf(msg);
-            vTaskDelay(pdMS_TO_TICKS(3000));
 
-            UBaseType_t uxHighWaterMark = uxTaskGetStackHighWaterMark(NULL);
-            ESP_LOGI(TAG2,"Espaço mínimo livre na stack: %u\n",uxHighWaterMark);
-        }
+    char aux[50];
+
+    while(1){
+        variables->snr = lora_packet_snr();
+
+        strcpy((char *)variables->packetLoRa, "");
+        strcpy(aux, "");
+
+        sprintf(aux, "%.1f", variables->anglePitchDeg);
+        strcat((char *)variables->packetLoRa, aux);
+
+        sprintf(aux, "!%.1f", variables->angleRollDeg);
+        strcat((char *)variables->packetLoRa, aux);
+
+        sprintf(aux, "@%.2f", variables->temp);
+        strcat((char *)variables->packetLoRa, aux);
+
+        sprintf(aux, "#%lu", variables->pressure_bmp);
+        strcat((char *)variables->packetLoRa, aux);
+
+        sprintf(aux, "C%s", variables->lat);
+        strcat((char *)variables->packetLoRa, aux);
+
+        sprintf(aux, "A%.1s", variables->lat_dir);
+        strcat((char *)variables->packetLoRa, aux);
+
+        sprintf(aux, "&%.11s", variables->lon);
+        strcat((char *)variables->packetLoRa, aux);
+
+        sprintf(aux, "*%.1s", variables->lon_dir);
+        strcat((char *)variables->packetLoRa, aux);
+
+        sprintf(aux, "(%.2f", variables->altitude);
+        strcat((char *)variables->packetLoRa, aux);
+        
+        sprintf(aux, ")%.3f", variables->speed);
+        strcat((char *)variables->packetLoRa, aux);
+
+        sprintf(aux, "B%dE", variables->snr);
+        strcat((char *)variables->packetLoRa, aux);
+
+        
+        lora_send_packet(variables->packetLoRa, sizeof(variables->packetLoRa));
+        ESP_LOGI(TAG2, "Data: %s\n Size: %d", (char *) variables->packetLoRa, 
+                                                 sizeof(variables->packetLoRa));
+
+        UBaseType_t uxHighWaterMark = uxTaskGetStackHighWaterMark(NULL); // obtenção de espaço livre na task em words
+        ESP_LOGI(TAG2,"Espaço mínimo livre na stack: %u\n", uxHighWaterMark);
+        
+        vTaskDelay(pdMS_TO_TICKS(3000));
     }
 }
