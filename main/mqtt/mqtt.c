@@ -78,12 +78,12 @@ void mqtt_start(void)
 {
     esp_mqtt_client_config_t mqtt_config = 
     {
-        .broker.address.uri = "mqtt://firstproject.wnology.io",
+        .broker.address.uri = "mqtt://66d24d27dcb9cc1a405b3d4a.wnology.io",
         .broker.address.port = 1883,
-        .credentials.username = "",
+        .credentials.username = "798cdb11-ce66-4944-a446-10e9f90662d1",
         .credentials.authentication.password = 
-            "",
-        .credentials.client_id = "",
+            "1fb95192036a0e11cb54eee41cb04f319fb54b16b82308c6a196e71050ffe9fe",
+        .credentials.client_id = "67005b8d6357fd1387ea3dc2",
     };
     client = esp_mqtt_client_init(&mqtt_config);
     esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, 
