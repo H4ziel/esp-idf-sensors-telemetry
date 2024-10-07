@@ -20,7 +20,7 @@
 
 #define BUFFER 2024
 #define FREQUENCY 915e6
-#define BW 125e3
+#define BW 250e3
 
 #define TX_PIN 17
 #define RX_PIN 23
