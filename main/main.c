@@ -227,7 +227,7 @@ void get_nmea(void *pvParameters)
     float longitude_sec;
 
     const char *GGA;  // identificador que possui latitude e longitude
-    //const char *VTG; // identificador que possui velocidade em Km/h
+    const char *VTG; // identificador que possui velocidade em Km/h
     memset(variables->buf, 0, BUFFER);
 
     while(1){
@@ -242,9 +242,13 @@ void get_nmea(void *pvParameters)
                                         &variables->raw_lon, variables->lon_dir, 
                                                           &variables->altitude);
         }
-
-        sscanf(variables->buf, "$GPVTG,,%*s,,%*s,%*f,%*s, %f,%*s,%*s", 
+        VTG = strstr(variables->buf, "$GPVTG");
+        if(VTG != NULL)
+        {
+            sscanf(variables->buf, "$GPVTG,%*f,%*s,%*f,%*s,%*f,%*s,%f,%*s", 
                                                              &variables->speed);
+        }
+        
 
         latitude_deg = (int)(variables->raw_lat/100);
         latitude_min_sec = (variables->raw_lat - latitude_deg*100);
